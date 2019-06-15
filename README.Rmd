@@ -1,0 +1,131 @@
+---
+title: "Graduate Admission"
+date: 2019-05-25T20-00-00
+output: 
+  md_document   
+---
+
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(
+  fig.width=12, fig.height=8,
+  cache = T
+)
+```
+
+# Load library ------------------
+
+```{r, warning = F, message = F}
+library(tidyverse)
+library(skimr)
+library(caret)
+library(caretEnsemble)
+library(doParallel)
+```
+
+# Load data ------------------
+
+```{r message=FALSE, warning=FALSE}
+data <- read_csv("./data/Admission_Predict_Ver1.1.csv")
+
+data <- data %>% mutate(Research = ifelse(Research == 1, T, F))
+
+data$`Serial No.` <- NULL
+```
+
+# Data exploration
+
+```{r}
+skim(data)
+```
+
+Preprocess with center and scale
+
+```{r}
+df <- data %>% preProcess(method = c("center", "scale")) %>% predict(data)
+```
+
+
+Chance of Admit vs GPA
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`, CGPA))
+```
+
+Chance of Admit vs GRE Score
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`, `GRE Score`))
+```
+
+Chance of Admit vs Letter of Recommendation
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`, LOR))
+```
+
+Chance of Admit vs Statement of Purpose
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`, SOP))
+```
+
+Chance of admit vs TOEFL Score
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`, `TOEFL Score`))
+```
+
+Chance of Admit vs Univeristy rating
+
+```{r}
+data %>% ggplot() + geom_point(aes(`Chance of Admit`,`University Rating`))
+```
+
+TOEFL vs GPA vs GRE
+
+```{r}
+
+data %>% ggplot() + 
+  geom_point(aes(`TOEFL Score`, CGPA, size = `GRE Score`, color = `Chance of Admit`), alpha = 0.4) +
+  scale_color_viridis_c()
+
+```
+
+
+# Modeling
+
+```{r}
+set.seed(1221)
+
+intrain <- createDataPartition(data$`Chance of Admit`, p = 0.8, list = F)
+
+index <- createMultiFolds(data[intrain,]$`Chance of Admit`, k = 10, times = 5)
+
+trCtr <- trainControl(method = "repeatedcv", repeats = 5, number = 10, index = index )
+
+formula <- as.formula(`Chance of Admit`~.)
+
+modelList <- caretList(formula,
+                       data = data[intrain,], 
+                       trControl = trCtr,
+                       metric = "RMSE",
+                       tuneList = list(
+                         bayesglm = caretModelSpec(method = "bayesglm")
+                          )
+                       )
+
+temp <- train(`Chance of Admit`~. , data = data[intrain,],  method = "bayesglm",
+              trControl = trCtr)
+
+summary(temp)
+
+
+data
+
+?caret::train
+
+
+
+```
+
