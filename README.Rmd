@@ -35,60 +35,56 @@ data$`Serial No.` <- NULL
 
 # Data exploration
 
+Over view
 ```{r}
 skim(data)
 ```
 
-Preprocess with center and scale
+- There is no missing data, and seems to be no outliner. Most of data is numeric, and not skewed. 
+
+Plot
 
 ```{r}
-df <- data %>% preProcess(method = c("center", "scale")) %>% predict(data)
+plot(data)
 ```
 
+- A lot of varriable are correlated. Removing correlated predictors is needed
 
-Chance of Admit vs GPA
+# Parallel processing
 
 ```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`, CGPA))
+cl <- makeCluster(16) 
+registerDoParallel(cl)
 ```
 
-Chance of Admit vs GRE Score
+# Partition data
 
 ```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`, `GRE Score`))
+
+set.seed(1221)
+
+intrain <- createDataPartition(data$`Chance of Admit`, p = 0.8, list = F)
+
+# Create fold
+index <- createMultiFolds(data[intrain,]$`Chance of Admit`, k = 10, times = 5)
+trCtr <- trainControl(method = "repeatedcv", repeats = 5, number = 10, index = index, verboseIter = T )
 ```
 
-Chance of Admit vs Letter of Recommendation
+## Choose Hyperparameters
 
-```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`, LOR))
-```
+```{r, cache = T}
 
-Chance of Admit vs Statement of Purpose
+XGBgrid <- expand.grid(nrounds = 100, # Fixed. depend on datasize
+                       max_depth = 6, # More will make model more complex and more likely to overfit. Choose only this due to computational barrier
+                       eta = c(0.01,0.05, 0.1), # NEED FINE TUNE
+                       gamma = 0, # it is usually OK to leave at 0
+                       min_child_weight = c(1,2,3), # The higher value, the more conservative model is, NEED FINE TUNE
+                       colsample_bytree = c(.4, .7, 1), # subsample by columns
+                       subsample = 1) # subsample by row leave at 1 since we doing k-fold
 
-```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`, SOP))
-```
+rpartgrid <- expand.grid(cp = runif(30,0,0.5))
 
-Chance of admit vs TOEFL Score
-
-```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`, `TOEFL Score`))
-```
-
-Chance of Admit vs Univeristy rating
-
-```{r}
-data %>% ggplot() + geom_point(aes(`Chance of Admit`,`University Rating`))
-```
-
-TOEFL vs GPA vs GRE
-
-```{r}
-
-data %>% ggplot() + 
-  geom_point(aes(`TOEFL Score`, CGPA, size = `GRE Score`, color = `Chance of Admit`), alpha = 0.4) +
-  scale_color_viridis_c()
+rfgrid <- expand.grid(mtry = 1:8)
 
 ```
 
@@ -96,36 +92,51 @@ data %>% ggplot() +
 # Modeling
 
 ```{r}
-set.seed(1221)
+data <- data %>% rename("admit" = `Chance of Admit`)
+formula <- as.formula(admit~.)
 
-intrain <- createDataPartition(data$`Chance of Admit`, p = 0.8, list = F)
 
-index <- createMultiFolds(data[intrain,]$`Chance of Admit`, k = 10, times = 5)
-
-trCtr <- trainControl(method = "repeatedcv", repeats = 5, number = 10, index = index )
-
-formula <- as.formula(`Chance of Admit`~.)
+set.seed(12342)
 
 modelList <- caretList(formula,
                        data = data[intrain,], 
                        trControl = trCtr,
                        metric = "RMSE",
+                       preProcess = c("pca"), # pca include center and scale
                        tuneList = list(
-                         bayesglm = caretModelSpec(method = "bayesglm")
+                         bayesglm = caretModelSpec(method = "bayesglm"),
+                         rf=caretModelSpec(method="rf", tuneGrid= rfgrid),
+                         SVM=caretModelSpec(method="svmRadial", tuneLength = 10),
+                         xgb=caretModelSpec(method="xgbTree", tuneGrid = XGBgrid),
+                         rpart= caretModelSpec(method = "rpart", tuneGrid = rpartgrid)
                           )
                        )
 
-temp <- train(`Chance of Admit`~. , data = data[intrain,],  method = "bayesglm",
-              trControl = trCtr)
 
-summary(temp)
+```
+
+# Summary
+
+```{r}
+dotplot(resamples(modelList))
+```
+
+# Diffrence
+
+```{r}
+diff(resamples(modelList)) %>% summary()
+```
+
+# Correlation models
+
+```{r}
+splom(resamples(modelList), metric = "RMSE")
+```
 
 
-data
+# RMSE on test set
 
-?caret::train
-
-
-
+```{r}
+modelList %>% map_df(~mean((predict(., newdata = data[-intrain,]) - data[-intrain,]$admit)^2))
 ```
 
